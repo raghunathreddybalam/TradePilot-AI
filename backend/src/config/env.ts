@@ -6,23 +6,22 @@ import { z } from "zod";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
+const marketProviders = ["mock", "angel", "upstox", "fivepaisa", "zerodha"] as const;
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().min(1),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
 
-  /** PAPER | LIVE — LIVE requires explicit enable + Zerodha credentials */
   TRADING_MODE: z.enum(["PAPER", "LIVE"]).default("PAPER"),
   LIVE_TRADING_ENABLED: z
     .string()
     .optional()
     .transform((v) => v === "true"),
 
-  /** Starting paper equity in INR */
-  PAPER_STARTING_EQUITY: z.coerce.number().default(500_000),
+  PAPER_STARTING_EQUITY: z.coerce.number().default(50_000),
 
-  /** OpenAI */
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   AI_FILTER_ENABLED: z
@@ -30,19 +29,38 @@ const envSchema = z.object({
     .optional()
     .transform((v) => v !== "false"),
 
-  /** Zerodha Kite Connect */
+  /** mock | angel | upstox | fivepaisa | zerodha */
+  MARKET_DATA_PROVIDER: z.enum(marketProviders).default("mock"),
+  USE_MOCK_MARKET_DATA: z.string().optional(),
+
+  /** Angel One */
+  ANGEL_API_KEY: z.string().optional(),
+  ANGEL_CLIENT_CODE: z.string().optional(),
+  ANGEL_PASSWORD: z.string().optional(),
+  ANGEL_TOTP_SECRET: z.string().optional(),
+
+  /** Upstox (free) */
+  UPSTOX_ACCESS_TOKEN: z.string().optional(),
+  UPSTOX_API_KEY: z.string().optional(),
+  UPSTOX_API_SECRET: z.string().optional(),
+  UPSTOX_REDIRECT_URI: z.string().optional(),
+
+  /** 5paisa (free) — access token preferred */
+  FIVEPAISA_ACCESS_TOKEN: z.string().optional(),
+  FIVEPAISA_CLIENT_CODE: z.string().optional(),
+  FIVEPAISA_APP_NAME: z.string().optional(),
+  FIVEPAISA_APP_SOURCE: z.string().optional(),
+  FIVEPAISA_USER_ID: z.string().optional(),
+  FIVEPAISA_PASSWORD: z.string().optional(),
+  FIVEPAISA_USER_KEY: z.string().optional(),
+  FIVEPAISA_ENCRYPTION_KEY: z.string().optional(),
+
+  /** Zerodha */
   KITE_API_KEY: z.string().optional(),
   KITE_API_SECRET: z.string().optional(),
   KITE_ACCESS_TOKEN: z.string().optional(),
 
-  /** Use simulated ticks when Zerodha is not configured */
-  USE_MOCK_MARKET_DATA: z
-    .string()
-    .optional()
-    .transform((v) => v !== "false"),
-
-  /** Watchlist symbols (comma-separated) */
-  WATCHLIST: z.string().default("NIFTY 50,NIFTY BANK,RELIANCE,TCS,INFY,HDFCBANK"),
+  WATCHLIST: z.string().default("NIFTY 50,NIFTY BANK"),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -54,11 +72,18 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 
+export type MarketProviderName = (typeof marketProviders)[number];
+
 export const WATCHLIST_SYMBOLS = env.WATCHLIST.split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
-/** Hard safety: live orders only when both flags are set */
+export function resolveMarketProvider(): MarketProviderName {
+  if (env.MARKET_DATA_PROVIDER) return env.MARKET_DATA_PROVIDER;
+  if (env.USE_MOCK_MARKET_DATA === "false") return "upstox";
+  return "mock";
+}
+
 export function isLiveTradingAllowed(): boolean {
   return (
     env.TRADING_MODE === "LIVE" &&

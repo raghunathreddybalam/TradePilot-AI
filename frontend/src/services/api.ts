@@ -85,13 +85,105 @@ export interface AppConfig {
   liveAllowed: boolean;
   watchlist: string[];
   aiFilterEnabled: boolean;
+  marketProvider: "mock" | "angel" | "zerodha" | string;
   mockMarketData: boolean;
+  candleIntervalMinutes?: number;
 }
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`);
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
   return res.json() as Promise<T>;
+}
+
+export interface BacktestOrder {
+  symbol: string;
+  side: "BUY" | "SELL";
+  setupTime: string;
+  orderTime: string;
+  entryPrice: number;
+  stopLoss: number;
+  trailingStopLoss: number;
+  exitPrice: number | null;
+  exitTime: string | null;
+  exitReason: "STOPLOSS" | "TRAIL_STOP" | "TARGET" | "EOD" | "OPEN";
+  takeProfit?: number | null;
+  pnlPoints: number | null;
+  maxFavorablePoints: number;
+  trailSteps: number;
+  reason: string;
+  optionSymbol?: string | null;
+  optionStrike?: number | null;
+  optionType?: "PE" | "CE" | null;
+  optionExpiry?: string | null;
+  optionLotSize?: number | null;
+  optionEntryPremium?: number | null;
+  optionExitPremium?: number | null;
+  optionPnlPoints?: number | null;
+  optionPnlInr?: number | null;
+}
+
+export interface BacktestSummary {
+  symbol: string;
+  timeframeMinutes: number;
+  trailStepPoints: number;
+  ordersTriggered: number;
+  stopLossHit: number;
+  trailStopHit: number;
+  stillOpen: number;
+  winRate: number | null;
+  optionPnlInrTotal?: number | null;
+  orders: BacktestOrder[];
+}
+
+export interface BacktestAllResponse {
+  timeframeMinutes: number;
+  trailStepPointsBySymbol?: Record<string, number>;
+  totals: {
+    ordersTriggered: number;
+    stopLossHit: number;
+    trailStopHit: number;
+    stillOpen: number;
+    winRate: number | null;
+  };
+  bySymbol: BacktestSummary[];
+}
+
+export interface MonthlyDaySummary {
+  date: string;
+  dayOpen: number;
+  atmStrike: number;
+  optionExpiry: string | null;
+  ordersTriggered: number;
+  stopLossHit: number;
+  trailStopHit: number;
+  targetHit?: number;
+  eodExit: number;
+  indexPnlPoints: number;
+  optionPnlInr: number | null;
+  orders: BacktestOrder[];
+}
+
+export interface MonthlyBacktestSummary {
+  symbol: string;
+  fromDate: string;
+  toDate: string;
+  exitMode?: "trail" | "rr4";
+  trailStepPoints: number;
+  riskReward?: number | null;
+  days: MonthlyDaySummary[];
+  totals: {
+    tradingDays: number;
+    ordersTriggered: number;
+    stopLossHit: number;
+    trailStopHit: number;
+    targetHit?: number;
+    eodExit: number;
+    indexPnlPoints: number;
+    optionPnlInr: number | null;
+    winRate: number | null;
+  };
+  note: string;
 }
 
 export const api = {
@@ -102,4 +194,16 @@ export const api = {
   trades: () => get<TradeRow[]>("/trades?limit=40"),
   signals: () => get<SignalRow[]>("/signals?limit=40"),
   account: () => get<AccountSummary>("/account"),
+  backtest: (symbol: string) =>
+    get<BacktestSummary>(`/backtest/${encodeURIComponent(symbol)}?count=200`),
+  backtestAll: () => get<BacktestAllResponse>("/backtest"),
+  backtestMonthAll: (mode: "trail" | "rr4" = "trail") =>
+    get<{ exitMode: string; bySymbol: MonthlyBacktestSummary[] }>(
+      `/backtest-month?mode=${mode}`,
+    ),
+  backtestMonthCompare: () =>
+    get<{
+      trail: { exitMode: string; bySymbol: MonthlyBacktestSummary[] };
+      rr4: { exitMode: string; bySymbol: MonthlyBacktestSummary[] };
+    }>("/backtest-month-compare"),
 };

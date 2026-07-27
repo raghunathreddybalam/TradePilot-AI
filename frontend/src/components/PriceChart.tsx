@@ -3,8 +3,7 @@ import {
   createChart,
   type IChartApi,
   type ISeriesApi,
-  type CandlestickData,
-  type LineData,
+  type UTCTimestamp,
   ColorType,
   CrosshairMode,
 } from "lightweight-charts";
@@ -14,13 +13,65 @@ interface Props {
   data: CandlePayload | null;
 }
 
+function toUtc(time: number): UTCTimestamp {
+  return Math.floor(time) as UTCTimestamp;
+}
+
+/** Lightweight Charts stores unix UTC; format axis/crosshair in IST for NSE. */
+function formatIstTime(time: number, withSeconds = false): string {
+  const d = new Date(time * 1000);
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: withSeconds ? "2-digit" : undefined,
+    hour12: false,
+  }).format(d);
+}
+
+function formatIstTickMark(time: number): string {
+  const d = new Date(time * 1000);
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
+function normalizeBars(bars: CandlePayload["bars"]) {
+  const byTime = new Map<number, (typeof bars)[number]>();
+  for (const b of bars) {
+    if (!Number.isFinite(b.time) || !Number.isFinite(b.close)) continue;
+    byTime.set(Math.floor(b.time), b);
+  }
+  return [...byTime.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, b]) => ({
+      time: toUtc(b.time),
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+    }));
+}
+
+function normalizeLine(points: Array<{ time: number; value: number } | null>) {
+  const byTime = new Map<number, number>();
+  for (const p of points) {
+    if (!p || !Number.isFinite(p.time) || !Number.isFinite(p.value)) continue;
+    byTime.set(Math.floor(p.time), p.value);
+  }
+  return [...byTime.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([time, value]) => ({ time: toUtc(time), value }));
+}
+
 export function PriceChart({ data }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const ema5Ref = useRef<ISeriesApi<"Line"> | null>(null);
-  const ema21Ref = useRef<ISeriesApi<"Line"> | null>(null);
-  const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -37,8 +88,17 @@ export function PriceChart({ data }: Props) {
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: "rgba(28, 55, 70, 0.15)" },
-      timeScale: { borderColor: "rgba(28, 55, 70, 0.15)", timeVisible: true },
-      width: containerRef.current.clientWidth,
+      localization: {
+        locale: "en-IN",
+        timeFormatter: (time) => formatIstTime(time as number),
+      },
+      timeScale: {
+        borderColor: "rgba(28, 55, 70, 0.15)",
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: (time) => formatIstTickMark(time as number),
+      },
+      width: containerRef.current.clientWidth || 600,
       height: 420,
     });
 
@@ -51,19 +111,10 @@ export function PriceChart({ data }: Props) {
       wickDownColor: "#c23b3b",
     });
     const ema5 = chart.addLineSeries({ color: "#1a7a9c", lineWidth: 2, title: "EMA5" });
-    const ema21 = chart.addLineSeries({ color: "#c47a1a", lineWidth: 2, title: "EMA21" });
-    const vwap = chart.addLineSeries({
-      color: "#6b4ea3",
-      lineWidth: 1,
-      lineStyle: 2,
-      title: "VWAP",
-    });
 
     chartRef.current = chart;
     candleRef.current = candles;
     ema5Ref.current = ema5;
-    ema21Ref.current = ema21;
-    vwapRef.current = vwap;
 
     const onResize = () => {
       if (containerRef.current && chartRef.current) {
@@ -76,22 +127,24 @@ export function PriceChart({ data }: Props) {
       window.removeEventListener("resize", onResize);
       chart.remove();
       chartRef.current = null;
+      candleRef.current = null;
+      ema5Ref.current = null;
     };
   }, []);
 
   useEffect(() => {
     if (!data || !candleRef.current) return;
 
-    const bars = data.bars as CandlestickData[];
-    candleRef.current.setData(bars);
+    try {
+      const bars = normalizeBars(data.bars);
+      if (bars.length === 0) return;
 
-    const toLine = (points: Array<{ time: number; value: number } | null>): LineData[] =>
-      points.filter((p): p is { time: number; value: number } => p != null) as LineData[];
-
-    ema5Ref.current?.setData(toLine(data.indicators.ema5));
-    ema21Ref.current?.setData(toLine(data.indicators.ema21));
-    vwapRef.current?.setData(toLine(data.indicators.vwap));
-    chartRef.current?.timeScale().fitContent();
+      candleRef.current.setData(bars);
+      ema5Ref.current?.setData(normalizeLine(data.indicators.ema5));
+      chartRef.current?.timeScale().fitContent();
+    } catch (err) {
+      console.error("[PriceChart] failed to render series", err);
+    }
   }, [data]);
 
   return <div className="chart-wrap" ref={containerRef} />;

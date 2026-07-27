@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { WS_URL } from "./api";
+import { WS_URL } from "../services/api";
 
 export interface LiveTick {
   symbol: string;

@@ -1,5 +1,6 @@
 import type { OhlcvBar, Tick } from "../types/market.js";
 import { EventEmitter } from "node:events";
+import { CANDLE_INTERVAL_MINUTES, floorToCandleBucket } from "../config/timeframe.js";
 
 export interface MarketDataProvider {
   readonly name: string;
@@ -82,12 +83,11 @@ export class MockMarketDataProvider extends EventEmitter implements MarketDataPr
   }
 
   private updateCandle(symbol: string, tick: Tick) {
-    const minute = new Date(tick.timestamp);
-    minute.setSeconds(0, 0);
+    const bucket = floorToCandleBucket(tick.timestamp, CANDLE_INTERVAL_MINUTES);
     const key = symbol;
     let candle = this.candleBuilders.get(key);
 
-    if (!candle || candle.timestamp.getTime() !== minute.getTime()) {
+    if (!candle || candle.timestamp.getTime() !== bucket.getTime()) {
       if (candle) {
         const hist = this.histories.get(symbol) ?? [];
         hist.push(candle);
@@ -95,7 +95,7 @@ export class MockMarketDataProvider extends EventEmitter implements MarketDataPr
         this.histories.set(symbol, hist);
       }
       candle = {
-        timestamp: minute,
+        timestamp: bucket,
         open: tick.price,
         high: tick.price,
         low: tick.price,
@@ -115,6 +115,7 @@ export class MockMarketDataProvider extends EventEmitter implements MarketDataPr
     const bars: OhlcvBar[] = [];
     let price = seed * (1 - 0.01);
     const now = Date.now();
+    const step = CANDLE_INTERVAL_MINUTES * 60_000;
     for (let i = 120; i >= 1; i--) {
       const drift = (Math.random() - 0.48) * seed * 0.001;
       const open = price;
@@ -122,7 +123,7 @@ export class MockMarketDataProvider extends EventEmitter implements MarketDataPr
       const high = Math.max(open, close) + Math.random() * seed * 0.0005;
       const low = Math.min(open, close) - Math.random() * seed * 0.0005;
       bars.push({
-        timestamp: new Date(now - i * 60_000),
+        timestamp: floorToCandleBucket(new Date(now - i * step), CANDLE_INTERVAL_MINUTES),
         open: round2(open),
         high: round2(high),
         low: round2(low),

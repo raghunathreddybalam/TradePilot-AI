@@ -13,7 +13,7 @@ React dashboard → Express backend → Market data → Indicator engine → Dec
 | Database | SQLite (local) / PostgreSQL (prod) + Prisma |
 | AI | OpenAI API (heuristic fallback if no key) |
 | Scheduler | node-cron |
-| Market data | Mock feed now · Zerodha Kite Connect ready |
+| Market data | Mock · **Upstox / 5paisa / Angel (free)** · Zerodha |
 | Real-time | WebSockets |
 
 ## Safety model
@@ -58,6 +58,69 @@ npm run dev
 - Paper fills with stop-loss / take-profit management
 - Dashboard shows watchlist, chart overlays, signal verdicts, and full trade explanations
 
+## Free live data (you already have Upstox + 5paisa)
+
+Orders stay **PAPER**. Only market prices come from the broker.
+
+### Option A — Upstox (recommended)
+
+1. Create an API app at [Upstox Developer Apps](https://account.upstox.com/developer/apps)  
+2. Set Redirect URI exactly to: `http://127.0.0.1:4000/api/upstox/callback`  
+3. Put key/secret in `backend/.env`:
+
+```env
+UPSTOX_API_KEY=...
+UPSTOX_API_SECRET=...
+UPSTOX_REDIRECT_URI=http://127.0.0.1:4000/api/upstox/callback
+```
+
+4. Restart backend, then open: http://localhost:4000/api/upstox/login  
+5. After login, copy `UPSTOX_ACCESS_TOKEN` from the page/terminal into `.env`  
+6. Set `MARKET_DATA_PROVIDER=upstox` and restart  
+
+Dashboard badge → **Upstox feed**
+
+### Option B — 5paisa
+
+1. Get access token from [Xstream / 5paisa API](https://xstream.5paisa.com/)  
+2. In `.env`:
+
+```env
+MARKET_DATA_PROVIDER=fivepaisa
+FIVEPAISA_ACCESS_TOKEN=...
+FIVEPAISA_CLIENT_CODE=your_client_code
+```
+
+3. Restart — badge → **5paisa feed**
+
+### Option C — Angel One
+
+See Angel section below.
+
+## Angel One SmartAPI (free live data)
+
+Best free option for real NSE quotes during market hours.
+
+1. Open / use an [Angel One](https://www.angelone.in/) trading account  
+2. Create an API app at [https://smartapi.angelone.in/](https://smartapi.angelone.in/)  
+3. Enable **TOTP** in the Angel app and copy the **secret key** (long base32 string — not the 6-digit code)  
+4. Put credentials in `backend/.env`:
+
+```env
+MARKET_DATA_PROVIDER=angel
+ANGEL_API_KEY=your_api_key
+ANGEL_CLIENT_CODE=your_client_id
+ANGEL_PASSWORD=your_pin
+ANGEL_TOTP_SECRET=your_totp_secret
+```
+
+5. Restart: `npm run dev`  
+6. Dashboard badge should show **Angel feed** (still **PAPER** orders)
+
+If login fails, TradePilot automatically falls back to **mock**.
+
+> Off-market hours: Angel returns last available prices / prior session candles — not fake random walks.
+
 ## Optional OpenAI
 
 ```env
@@ -66,12 +129,12 @@ OPENAI_MODEL=gpt-4o-mini
 AI_FILTER_ENABLED=true
 ```
 
-## Zerodha (later)
+## Zerodha (optional / later)
 
-1. Paper trade extensively and review explanations / PnL
-2. Set `USE_MOCK_MARKET_DATA=false` and wire `KiteTicker` in `backend/src/market/provider.ts`
-3. Wire `kiteconnect` in `backend/src/broker/index.ts`
-4. Only then enable live flags above
+1. Paper trade extensively with Angel or mock and review explanations / PnL  
+2. Set `MARKET_DATA_PROVIDER=zerodha` and wire `KiteTicker` in `backend/src/market/provider.ts`  
+3. Wire `kiteconnect` in `backend/src/broker/index.ts`  
+4. Only then enable live order flags  
 
 ## Useful scripts
 
@@ -91,7 +154,7 @@ React Dashboard
       │
       ▼
 Node.js Backend
- ├── Market Data (mock | Zerodha)
+ ├── Market Data (mock | Upstox | 5paisa | Angel | Zerodha)
  ├── Indicator Engine (EMA, RSI, VWAP, ATR)
  ├── Decision Engine (strategy)
  ├── AI Agent (trade filter + explanation)

@@ -32,6 +32,8 @@ export interface TradeDecision {
   action: SignalAction;
   confidence: number;
   reason: string;
+  /** Preferred fill price (e.g. setup candle low/high) */
+  entryPrice?: number;
   stopLoss?: number;
   takeProfit?: number;
   quantity?: number;

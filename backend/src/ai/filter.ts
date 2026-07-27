@@ -68,8 +68,7 @@ export async function filterTradeWithAi(
 
 /** Deterministic fallback when OpenAI is offline or unconfigured */
 function heuristicFilter(symbol: string, decision: TradeDecision): AiFilterResult {
-  const { indicators, confidence, action } = decision;
-  const rsi = indicators.rsi14;
+  const { confidence, action } = decision;
 
   if (action !== "BUY" && action !== "SELL") {
     return {
@@ -80,37 +79,20 @@ function heuristicFilter(symbol: string, decision: TradeDecision): AiFilterResul
     };
   }
 
-  if (confidence < 0.6) {
+  if (confidence < 0.5) {
     return {
       approved: false,
       score: confidence,
-      reason: `Heuristic reject ${symbol}: confidence ${confidence.toFixed(2)} below 0.60`,
+      reason: `Heuristic reject ${symbol}: confidence ${confidence.toFixed(2)} below 0.50`,
       verdict: "rejected",
     };
   }
 
-  if (action === "BUY" && rsi != null && rsi > 72) {
-    return {
-      approved: false,
-      score: confidence * 0.5,
-      reason: `Heuristic reject: RSI ${rsi.toFixed(1)} overbought for long`,
-      verdict: "rejected",
-    };
-  }
-
-  if (action === "SELL" && rsi != null && rsi < 28) {
-    return {
-      approved: false,
-      score: confidence * 0.5,
-      reason: `Heuristic reject: RSI ${rsi.toFixed(1)} oversold for short`,
-      verdict: "rejected",
-    };
-  }
-
+  // EMA(5)-only strategy: allow crosses without RSI extremes filter
   return {
     approved: true,
     score: confidence,
-    reason: `Heuristic approve ${symbol}: confluence OK (no OpenAI key — rule-based)`,
+    reason: `Heuristic approve ${symbol}: EMA(5) cross OK`,
     verdict: "approved",
   };
 }

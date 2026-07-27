@@ -440,9 +440,114 @@ td.explain {
   }
 }
 
+.backtest-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.opt-exp {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.month-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0.5rem 0 0;
+}
+
+.month-heading {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.month-toolbar button {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.month-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.month-toolbar button.active {
+  border-color: #1a6b4a;
+  background: rgba(26, 107, 74, 0.12);
+  font-weight: 600;
+}
+
+.month-toolbar button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.month-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0 0 0.85rem;
+  line-height: 1.4;
+}
+
+.month-trade-row td {
+  background: rgba(0, 0, 0, 0.03);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+button.linkish {
+  border: none;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.backtest-metrics article {
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+
+.backtest-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 0.3rem;
+}
+
+.backtest-metrics strong {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 1.15rem;
+}
+
+.backtest h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 @media (max-width: 1100px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .backtest-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .metrics {

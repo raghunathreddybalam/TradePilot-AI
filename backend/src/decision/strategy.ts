@@ -1,127 +1,185 @@
-import type { IndicatorSnapshot, TradeDecision } from "../types/market.js";
+import { ema } from "../indicators/engine.js";
+import type { IndicatorSnapshot, OhlcvBar, TradeDecision } from "../types/market.js";
+import { trailStepForSymbol } from "./trailingStop.js";
+
+/** Only short setups for now (gap above EMA → touch). Buys are ignored. */
+export const SELL_ONLY = true;
 
 export interface StrategyContext {
   symbol: string;
   indicators: IndicatorSnapshot;
-  /** Previous bar EMA5 for crossover detection */
-  prevEma5?: number | null;
-  prevClose?: number | null;
+  /** Full OHLCV history (oldest → newest), including forming candle */
+  bars: OhlcvBar[];
+}
+
+export interface SetupSignal {
+  side: "BUY" | "SELL";
+  setupIndex: number;
+  confirmIndex: number;
+  setupTime: Date;
+  confirmTime: Date;
+  entryPrice: number;
+  stopLoss: number;
+  setupEma: number;
+  confirmEma: number;
+  reason: string;
+}
+
+/** Candle range intersects EMA (wick or body touches the line) */
+export function touchesEma(bar: OhlcvBar, emaValue: number): boolean {
+  return bar.low <= emaValue && bar.high >= emaValue;
+}
+
+/** Entire candle strictly above EMA (no touch) */
+export function aboveWithoutTouch(bar: OhlcvBar, emaValue: number): boolean {
+  return bar.low > emaValue;
+}
+
+/** Entire candle strictly below EMA (no touch) */
+export function belowWithoutTouch(bar: OhlcvBar, emaValue: number): boolean {
+  return bar.high < emaValue;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function buildSignal(
+  side: "BUY" | "SELL",
+  setup: OhlcvBar,
+  confirm: OhlcvBar,
+  setupIdx: number,
+  confirmIdx: number,
+  setupEma: number,
+  confirmEma: number,
+  symbol: string,
+): SetupSignal {
+  const trailStep = trailStepForSymbol(symbol);
+  if (side === "SELL") {
+    const entry = setup.low;
+    const stop = setup.high;
+    return {
+      side,
+      setupIndex: setupIdx,
+      confirmIndex: confirmIdx,
+      setupTime: setup.timestamp,
+      confirmTime: confirm.timestamp,
+      entryPrice: round2(entry),
+      stopLoss: round2(stop),
+      setupEma,
+      confirmEma,
+      reason: [
+        `SELL ${symbol}`,
+        `setup above EMA(5)=${setupEma.toFixed(2)} (no touch)`,
+        `next touched EMA(5)=${confirmEma.toFixed(2)}`,
+        `entry=setup low ${entry.toFixed(2)}`,
+        `SL=setup high ${stop.toFixed(2)}`,
+        `exit=trail every ${trailStep}pts (no fixed TP)`,
+      ].join(" | "),
+    };
+  }
+
+  const entry = setup.high;
+  const stop = setup.low;
+  return {
+    side,
+    setupIndex: setupIdx,
+    confirmIndex: confirmIdx,
+    setupTime: setup.timestamp,
+    confirmTime: confirm.timestamp,
+    entryPrice: round2(entry),
+    stopLoss: round2(stop),
+    setupEma,
+    confirmEma,
+    reason: [
+      `BUY ${symbol}`,
+      `setup below EMA(5)=${setupEma.toFixed(2)} (no touch)`,
+      `next touched EMA(5)=${confirmEma.toFixed(2)}`,
+      `entry=setup high ${entry.toFixed(2)}`,
+      `SL=setup low ${stop.toFixed(2)}`,
+      `exit=trail every ${trailStep}pts (no fixed TP)`,
+    ].join(" | "),
+  };
 }
 
 /**
- * Simple intraday bias strategy:
- * - BUY when price > VWAP, EMA5 > EMA21, RSI between 40-70 (momentum, not overbought)
- * - SELL when price < VWAP, EMA5 < EMA21, RSI between 30-60
- * - HOLD otherwise
- *
- * Risk: stop = 1.5 * ATR, target = 2.5 * ATR
+ * Scan completed bars for every EMA(5) gap→touch setup.
+ * `bars` should be oldest→newest; forming candle may be included (last bar ignored if dropForming).
+ */
+export function findAllSetups(
+  symbol: string,
+  bars: OhlcvBar[],
+  dropForming = true,
+): SetupSignal[] {
+  const completed = dropForming && bars.length > 0 ? bars.slice(0, -1) : bars;
+  if (completed.length < 7) return [];
+
+  const closes = completed.map((b) => b.close);
+  const ema5Series = ema(closes, 5);
+  const out: SetupSignal[] = [];
+
+  for (let confirmIdx = 5; confirmIdx < completed.length; confirmIdx++) {
+    const setupIdx = confirmIdx - 1;
+    const setup = completed[setupIdx]!;
+    const confirm = completed[confirmIdx]!;
+    const setupEma = ema5Series[setupIdx];
+    const confirmEma = ema5Series[confirmIdx];
+    if (setupEma == null || confirmEma == null) continue;
+
+    if (aboveWithoutTouch(setup, setupEma) && touchesEma(confirm, confirmEma)) {
+      out.push(
+        buildSignal("SELL", setup, confirm, setupIdx, confirmIdx, setupEma, confirmEma, symbol),
+      );
+    } else if (
+      !SELL_ONLY &&
+      belowWithoutTouch(setup, setupEma) &&
+      touchesEma(confirm, confirmEma)
+    ) {
+      out.push(
+        buildSignal("BUY", setup, confirm, setupIdx, confirmIdx, setupEma, confirmEma, symbol),
+      );
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Live decision = latest completed pair only (trail SL exit, no fixed TP).
  */
 export function evaluateStrategy(ctx: StrategyContext): TradeDecision {
-  const { indicators, symbol } = ctx;
-  const { close, ema5, ema9, ema21, rsi14, vwap, atr14 } = indicators;
+  const { symbol, indicators, bars } = ctx;
+  const setups = findAllSetups(symbol, bars, true);
+  const latest = setups[setups.length - 1];
 
-  if (
-    ema5 == null ||
-    ema9 == null ||
-    ema21 == null ||
-    rsi14 == null ||
-    vwap == null ||
-    atr14 == null
-  ) {
+  if (!latest) {
     return {
       action: "HOLD",
-      confidence: 0,
-      reason: `Insufficient indicator data for ${symbol}`,
+      confidence: 0.2,
+      reason: `${symbol}: no EMA(5) gap→touch on last completed 5m pair`,
       indicators,
     };
   }
 
-  const aboveVwap = close > vwap;
-  const bullishEma = ema5 > ema21 && ema5 > ema9;
-  const bearishEma = ema5 < ema21 && ema5 < ema9;
-  const rsiOkLong = rsi14 >= 40 && rsi14 <= 70;
-  const rsiOkShort = rsi14 >= 30 && rsi14 <= 60;
-
-  // EMA5 cross up through EMA21 recently (uses prev if available)
-  const crossedUp =
-    ctx.prevEma5 != null &&
-    ctx.prevClose != null &&
-    ctx.prevEma5 <= (indicators.ema21 ?? Infinity) &&
-    ema5 > ema21;
-
-  const crossedDown =
-    ctx.prevEma5 != null &&
-    ctx.prevClose != null &&
-    ctx.prevEma5 >= (indicators.ema21 ?? -Infinity) &&
-    ema5 < ema21;
-
-  if (aboveVwap && bullishEma && rsiOkLong) {
-    const confidence = Math.min(
-      0.95,
-      0.55 +
-        (crossedUp ? 0.15 : 0) +
-        Math.min(0.15, (close - vwap) / vwap) +
-        (rsi14 > 50 ? 0.05 : 0),
-    );
-
+  // Only fire if the confirm candle is the latest completed bar
+  const completed = bars.slice(0, -1);
+  const lastCompleted = completed[completed.length - 1];
+  if (!lastCompleted || lastCompleted.timestamp.getTime() !== latest.confirmTime.getTime()) {
     return {
-      action: "BUY",
-      confidence,
-      reason: buildReason("BUY", symbol, indicators, { aboveVwap, bullishEma, crossedUp }),
-      stopLoss: round2(close - 1.5 * atr14),
-      takeProfit: round2(close + 2.5 * atr14),
-      indicators,
-    };
-  }
-
-  if (!aboveVwap && bearishEma && rsiOkShort) {
-    const confidence = Math.min(
-      0.95,
-      0.55 +
-        (crossedDown ? 0.15 : 0) +
-        Math.min(0.15, (vwap - close) / vwap) +
-        (rsi14 < 50 ? 0.05 : 0),
-    );
-
-    return {
-      action: "SELL",
-      confidence,
-      reason: buildReason("SELL", symbol, indicators, { aboveVwap, bearishEma, crossedDown }),
-      stopLoss: round2(close + 1.5 * atr14),
-      takeProfit: round2(close - 2.5 * atr14),
+      action: "HOLD",
+      confidence: 0.2,
+      reason: `${symbol}: last setup already aged — waiting for new gap→touch`,
       indicators,
     };
   }
 
   return {
-    action: "HOLD",
-    confidence: 0.3,
-    reason: `${symbol}: no setup — price ${aboveVwap ? "above" : "below"} VWAP, EMA5 ${ema5.toFixed(2)} vs EMA21 ${ema21.toFixed(2)}, RSI ${rsi14.toFixed(1)}`,
+    action: latest.side,
+    confidence: 0.8,
+    entryPrice: latest.entryPrice,
+    stopLoss: latest.stopLoss,
+    quantity: 1,
+    reason: latest.reason,
     indicators,
   };
-}
-
-function buildReason(
-  side: "BUY" | "SELL",
-  symbol: string,
-  ind: IndicatorSnapshot,
-  flags: Record<string, boolean>,
-): string {
-  const parts = [
-    `${side} ${symbol} @ ${ind.close.toFixed(2)}`,
-    `EMA5=${ind.ema5?.toFixed(2)} EMA21=${ind.ema21?.toFixed(2)}`,
-    `VWAP=${ind.vwap?.toFixed(2)}`,
-    `RSI=${ind.rsi14?.toFixed(1)}`,
-    `ATR=${ind.atr14?.toFixed(2)}`,
-  ];
-  const flagText = Object.entries(flags)
-    .filter(([, v]) => v)
-    .map(([k]) => k)
-    .join(", ");
-  if (flagText) parts.push(`flags: ${flagText}`);
-  return parts.join(" | ");
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
