@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tradepilot-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tradepilot
+      POSTGRES_PASSWORD: tradepilot
+      POSTGRES_DB: tradepilot
+    volumes:
+      - tradepilot_pg:/var/lib/postgresql/data
+
+volumes:
+  tradepilot_pg:

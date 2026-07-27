@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum InstrumentType {
+  INDEX
+  STOCK
+  FUTURE
+  OPTION
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+enum TradeStatus {
+  PENDING
+  OPEN
+  CLOSED
+  CANCELLED
+  REJECTED
+}
+
+enum OrderMode {
+  PAPER
+  LIVE
+}
+
+enum SignalAction {
+  BUY
+  SELL
+  HOLD
+  SKIP
+}
+
+model Instrument {
+  id           String         @id @default(cuid())
+  symbol       String         @unique
+  name         String
+  exchange     String         @default("NSE")
+  instrumentType InstrumentType
+  kiteToken    Int?
+  lotSize      Int            @default(1)
+  tickSize     Float          @default(0.05)
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  candles      Candle[]
+  signals      Signal[]
+  trades       Trade[]
+  positions    Position[]
+
+  @@index([symbol])
+  @@index([isActive])
+}
+
+/// OHLCV candle bar. Interval stored as minutes (1, 5, 15, etc.)
+model Candle {
+  id           String     @id @default(cuid())
+  instrumentId String
+  instrument   Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+  interval     Int
+  timestamp    DateTime
+  open         Float
+  high         Float
+  low          Float
+  close        Float
+  volume       Float
+  createdAt    DateTime   @default(now())
+
+  @@unique([instrumentId, interval, timestamp])
+  @@index([instrumentId, interval, timestamp])
+}
+
+model Signal {
+  id           String       @id @default(cuid())
+  instrumentId String
+  instrument   Instrument   @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+  action       SignalAction
+  confidence   Float
+  price        Float
+  /// Technical reason before AI filter
+  reason       String
+  /// Indicator snapshot at signal time (JSON)
+  indicators   Json
+  /// AI filter verdict: approved | rejected | skipped
+  aiVerdict    String?
+  aiReason     String?
+  aiScore      Float?
+  createdAt    DateTime     @default(now())
+  trade        Trade?
+
+  @@index([instrumentId, createdAt])
+  @@index([createdAt])
+}
+
+model Trade {
+  id             String      @id @default(cuid())
+  instrumentId   String
+  instrument     Instrument  @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+  signalId       String?     @unique
+  signal         Signal?     @relation(fields: [signalId], references: [id])
+  side           TradeSide
+  status         TradeStatus @default(PENDING)
+  mode           OrderMode   @default(PAPER)
+  quantity       Int
+  entryPrice     Float?
+  exitPrice      Float?
+  stopLoss       Float?
+  takeProfit     Float?
+  pnl            Float?
+  pnlPercent     Float?
+  /// Human-readable explanation of why this trade was taken
+  explanation    String
+  brokerOrderId  String?
+  openedAt       DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([status, mode])
+  @@index([instrumentId, createdAt])
+}
+
+model Position {
+  id           String     @id @default(cuid())
+  instrumentId String
+  instrument   Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+  mode         OrderMode  @default(PAPER)
+  quantity     Int
+  avgPrice     Float
+  unrealizedPnl Float     @default(0)
+  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime   @default(now())
+
+  @@unique([instrumentId, mode])
+}
+
+model AccountSnapshot {
+  id            String    @id @default(cuid())
+  mode          OrderMode @default(PAPER)
+  equity        Float
+  cash          Float
+  realizedPnl   Float     @default(0)
+  unrealizedPnl Float     @default(0)
+  openTrades    Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  @@index([mode, createdAt])
+}
+
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
