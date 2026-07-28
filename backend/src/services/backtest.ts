@@ -52,6 +52,14 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function istDate(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+function todayIst(): string {
+  return istDate(new Date());
+}
+
 export function takeProfitPrice(
   side: "BUY" | "SELL",
   entry: number,
@@ -259,7 +267,7 @@ export function resolveExit(
 }
 
 /**
- * Backtest today's (available) 5m history for one symbol.
+ * Backtest today's IST session only (EMA warm-up may use prior bars).
  */
 export function backtestSymbol(
   symbol: string,
@@ -268,7 +276,11 @@ export function backtestSymbol(
   exitMode: ExitMode = "trail",
 ): BacktestSummary {
   const completed = bars.length > 0 ? bars.slice(0, -1) : [];
-  const setups = findAllSetups(symbol, bars, true);
+  const day = todayIst();
+  // Scan full history for EMA context, keep only setups confirmed today (IST)
+  const setups = findAllSetups(symbol, bars, true).filter(
+    (s) => istDate(s.confirmTime) === day,
+  );
   const trailStep = trailStepForSymbol(symbol);
 
   const orders: BacktestOrder[] = setups.map((s) => {

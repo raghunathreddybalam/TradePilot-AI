@@ -14,6 +14,11 @@ import {
   hasUpstoxOAuthApp,
 } from "../market/upstoxClient.js";
 
+function startOfTodayIst(): Date {
+  const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return new Date(`${ymd}T00:00:00+05:30`);
+}
+
 export function createApiRouter(market: MarketDataProvider) {
   const router = Router();
 
@@ -108,6 +113,7 @@ export function createApiRouter(market: MarketDataProvider) {
   router.get("/signals", async (req, res) => {
     const take = Math.min(Number(req.query.limit) || 50, 200);
     const signals = await prisma.signal.findMany({
+      where: { createdAt: { gte: startOfTodayIst() } },
       take,
       orderBy: { createdAt: "desc" },
       include: { instrument: true, trade: true },
@@ -119,7 +125,10 @@ export function createApiRouter(market: MarketDataProvider) {
     const take = Math.min(Number(req.query.limit) || 50, 200);
     const status = req.query.status as TradeStatus | undefined;
     const trades = await prisma.trade.findMany({
-      where: status ? { status } : undefined,
+      where: {
+        createdAt: { gte: startOfTodayIst() },
+        ...(status ? { status } : {}),
+      },
       take,
       orderBy: { createdAt: "desc" },
       include: { instrument: true, signal: true },

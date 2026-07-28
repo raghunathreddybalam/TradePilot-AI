@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { PriceChart } from "./components/PriceChart";
+import { StrategyAlertHost } from "./components/StrategyAlertHost";
 import { useMarketSocket } from "./hooks/useMarketSocket";
 import {
   api,
@@ -43,12 +44,19 @@ function formatIst(iso: string | null) {
 
 function BacktestPanel({ summary }: { summary: BacktestSummary }) {
   const trail = summary.trailStepPoints;
+  const ordersNewestFirst = [...summary.orders].sort(
+    (a, b) => new Date(b.orderTime).getTime() - new Date(a.orderTime).getTime(),
+  );
 
   return (
     <section className="backtest panel">
       <h2>
-        Today’s strategy stats — {summary.symbol} (5m · SELL only · trail every {trail}
-        pts · PE option P&amp;L)
+        Today’s strategy stats — {summary.symbol} · {new Date().toLocaleDateString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          day: "2-digit",
+          month: "short",
+        })}{" "}
+        only (5m · SELL · trail {trail}pts)
       </h2>
       <div className="backtest-metrics">
         <article>
@@ -83,7 +91,7 @@ function BacktestPanel({ summary }: { summary: BacktestSummary }) {
         </article>
       </div>
 
-      <h3>Order details · index SELL → buy nearest PE (current expiry)</h3>
+      <h3>Order details (newest first) · index SELL → buy nearest PE</h3>
       <div className="table-wrap">
         <table>
           <thead>
@@ -105,14 +113,14 @@ function BacktestPanel({ summary }: { summary: BacktestSummary }) {
             </tr>
           </thead>
           <tbody>
-            {summary.orders.length === 0 && (
+            {ordersNewestFirst.length === 0 && (
               <tr>
                 <td colSpan={14} className="empty">
                   No SELL gap→touch setups on today’s loaded 5m candles yet.
                 </td>
               </tr>
             )}
-            {summary.orders.map((o, i) => (
+            {ordersNewestFirst.map((o, i) => (
               <tr key={`${summary.symbol}-${o.orderTime}-${i}`}>
                 <td>{formatIst(o.setupTime)}</td>
                 <td>{formatIst(o.orderTime)}</td>
@@ -161,6 +169,7 @@ function MonthlyPanel({ summary }: { summary: MonthlyBacktestSummary }) {
   const t = summary.totals;
   const modeLabel =
     summary.exitMode === "rr4" ? "1:4 target" : `trail ${summary.trailStepPoints}pts`;
+  const daysNewestFirst = [...summary.days].sort((a, b) => b.date.localeCompare(a.date));
 
   return (
     <section className="backtest panel month-panel">
@@ -201,7 +210,7 @@ function MonthlyPanel({ summary }: { summary: MonthlyBacktestSummary }) {
         </article>
       </div>
 
-      <h3>Daily breakdown · PE = that day’s open ATM</h3>
+      <h3>Daily breakdown (newest first) · PE = that day’s open ATM</h3>
       <div className="table-wrap">
         <table>
           <thead>
@@ -220,14 +229,14 @@ function MonthlyPanel({ summary }: { summary: MonthlyBacktestSummary }) {
             </tr>
           </thead>
           <tbody>
-            {summary.days.length === 0 && (
+            {daysNewestFirst.length === 0 && (
               <tr>
                 <td colSpan={11} className="empty">
                   No monthly data yet.
                 </td>
               </tr>
             )}
-            {summary.days.map((d) => (
+            {daysNewestFirst.map((d) => (
               <Fragment key={d.date}>
                 <tr>
                   <td>{d.date}</td>
@@ -347,6 +356,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <StrategyAlertHost signals={signals} trades={trades} />
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden />
@@ -474,6 +484,57 @@ export default function App() {
         <BacktestPanel key={bt.symbol} summary={bt} />
       ))}
 
+      <section className="trades panel">
+        <h2>Today’s trades — newest first</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>P&amp;L</th>
+                <th>Status</th>
+                <th>Explanation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trades.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="empty">
+                    No paper trades yet — engine evaluates completed 5m candles (gap→touch EMA5).
+                  </td>
+                </tr>
+              )}
+              {[...trades]
+                .sort(
+                  (a, b) =>
+                    new Date(b.openedAt ?? b.createdAt).getTime() -
+                    new Date(a.openedAt ?? a.createdAt).getTime(),
+                )
+                .map((t) => (
+                <tr key={t.id}>
+                  <td>{new Date(t.openedAt ?? t.createdAt).toLocaleTimeString("en-IN")}</td>
+                  <td>{t.instrument.symbol}</td>
+                  <td className={t.side === "BUY" ? "up" : "down"}>{t.side}</td>
+                  <td>{t.quantity}</td>
+                  <td>{t.entryPrice?.toFixed(2) ?? "—"}</td>
+                  <td>{t.exitPrice?.toFixed(2) ?? "—"}</td>
+                  <td className={(t.pnl ?? 0) >= 0 ? "up" : "down"}>
+                    {t.pnl != null ? t.pnl.toFixed(2) : "—"}
+                  </td>
+                  <td>{t.status}</td>
+                  <td className="explain">{t.explanation}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <div className="month-toolbar">
         <h2 className="month-heading">Last month P&amp;L</h2>
         <div className="month-actions">
@@ -502,51 +563,6 @@ export default function App() {
       {monthlies.map((m) => (
         <MonthlyPanel key={m.symbol} summary={m} />
       ))}
-
-      <section className="trades panel">
-        <h2>Trades — every fill explained</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th>Qty</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>P&amp;L</th>
-                <th>Status</th>
-                <th>Explanation</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trades.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="empty">
-                    No paper trades yet — engine evaluates completed 5m candles (gap→touch EMA5).
-                  </td>
-                </tr>
-              )}
-              {trades.map((t) => (
-                <tr key={t.id}>
-                  <td>{new Date(t.createdAt).toLocaleTimeString("en-IN")}</td>
-                  <td>{t.instrument.symbol}</td>
-                  <td className={t.side === "BUY" ? "up" : "down"}>{t.side}</td>
-                  <td>{t.quantity}</td>
-                  <td>{t.entryPrice?.toFixed(2) ?? "—"}</td>
-                  <td>{t.exitPrice?.toFixed(2) ?? "—"}</td>
-                  <td className={(t.pnl ?? 0) >= 0 ? "up" : "down"}>
-                    {t.pnl != null ? t.pnl.toFixed(2) : "—"}
-                  </td>
-                  <td>{t.status}</td>
-                  <td className="explain">{t.explanation}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
 
       <footer className="footer">
         Live orders via Zerodha stay locked until{" "}

@@ -126,10 +126,7 @@ export class UpstoxClient {
     instrumentKey: string,
     intervalMinutes = 5,
   ): Promise<Array<[string, number, number, number, number, number, number?]>> {
-    const cacheKey = candleCacheKey(instrumentKey, "intraday", String(intervalMinutes));
-    const cached = getCachedCandles(cacheKey);
-    if (cached) return cached;
-
+    // Don't long-cache intraday — session grows every 5 minutes
     const key = encodeURIComponent(instrumentKey);
     const res = await upstoxFetch(
       `${BASE}/v3/historical-candle/intraday/${key}/minutes/${intervalMinutes}`,
@@ -142,9 +139,7 @@ export class UpstoxClient {
     if (json.status !== "success") {
       throw new Error(`Upstox intraday failed: ${JSON.stringify(json.message ?? json)}`);
     }
-    const candles = json.data?.candles ?? [];
-    setCachedCandles(cacheKey, candles);
-    return candles;
+    return json.data?.candles ?? [];
   }
 
   /** Historical candles between dates (YYYY-MM-DD) */
